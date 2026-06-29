@@ -1,0 +1,10 @@
+# Dipendenze del SOLO step6_pdf.py (generazione PDF di preventivo).
+# Tutti gli altri step della pipeline usano esclusivamente la libreria standard.
+#
+# Installazione su Windows:
+#   py -m pip install -r requirements.txt
+# Se pip protesta per l'ambiente gestito:
+#   py -m pip install -r requirements.txt --break-system-packages
+
+reportlab        # generazione del PDF
+svglib           # converte il logo SVG in vettoriale per reportlab (niente cairo necessario)
