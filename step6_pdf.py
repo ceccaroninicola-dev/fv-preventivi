@@ -55,8 +55,6 @@ PREZZO_ELETTRICITA = C.PREZZO_ELETTRICITA
 # Static Maps maptype=satellite che e' disabilitato nel SEE).
 SOLAR_DATALAYERS = "https://solar.googleapis.com/v1/dataLayers:get"
 RADIUS_METERS = 35        # raggio richiesto alla Solar API (taratura inquadratura)
-CENTER_CROP_FRAC = 0.65   # porzione centrale tenuta dopo lo scarico (zoom sull'edificio)
-NODATA_SOGLIA = 14        # tolleranza colore per ritagliare le fasce "no data" ai bordi
 
 # --- colori brand ---
 BRAND = "#3BA9DD"
@@ -163,37 +161,9 @@ def _append_key(url, key):
     return f"{url}{sep}key={urllib.parse.quote(key)}"
 
 
-def _ritaglia_nodata(im, soglia=NODATA_SOGLIA):
-    """Ritaglia le fasce uniformi 'no data' ai bordi del GeoTIFF (di qualsiasi tinta:
-    grigio, nero...). Tecnica: si prende il colore di un angolo come riferimento, si
-    calcola la differenza pixel-pixel e si tiene il bounding box di cio' che se ne
-    discosta oltre 'soglia'. Robusto perche' non assume il valore esatto del no-data.
-    """
-    from PIL import Image, ImageChops
-    sfondo = Image.new("RGB", im.size, im.getpixel((0, 0)))
-    diff = ImageChops.difference(im, sfondo).convert("L")
-    maschera = diff.point(lambda p: 255 if p > soglia else 0)
-    bbox = maschera.getbbox()
-    if bbox:
-        w, h = im.size
-        bw, bh = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        if bw * bh >= 0.05 * w * h:   # evita crop su artefatti minuscoli (immagine quasi tutta uniforme)
-            return im.crop(bbox)
-    return im
-
-
-def _crop_centrale(im, frac=CENTER_CROP_FRAC):
-    """Tiene la porzione centrale (frac di larghezza e altezza): zoom sull'edificio."""
-    frac = max(0.1, min(1.0, frac))
-    w, h = im.size
-    cw, ch = max(1, int(w * frac)), max(1, int(h * frac))
-    left, top = (w - cw) // 2, (h - ch) // 2
-    return im.crop((left, top, left + cw, top + ch))
-
-
 def _tiff_to_png(data, out_path):
-    """Converte i byte di un GeoTIFF RGB in PNG, rimuovendo le fasce no-data ai bordi
-    e zoomando sull'edificio (crop centrale).
+    """Converte i byte di un GeoTIFF RGB in PNG (l'immagine resta com'e': l'inquadratura
+    nel PDF e' gestita in fase di rendering con il 'cover' del riquadro).
     Primario: Pillow. Fallback: tifffile -> Pillow. Ritorna True se riuscito."""
     from io import BytesIO
     im = None
@@ -222,9 +192,6 @@ def _tiff_to_png(data, out_path):
         except Exception as e:
             sys.stderr.write(f"[avviso] conversione GeoTIFF fallita ({e}).\n")
             return False
-    # 1) via le fasce no-data ai bordi  2) zoom sull'edificio (porzione centrale)
-    im = _ritaglia_nodata(im)
-    im = _crop_centrale(im)
     im.save(out_path, "PNG")
     return True
 
@@ -305,24 +272,38 @@ def disegna_logo(c, x, y, altezza):
 # Pezzi grafici
 # --------------------------------------------------------------------------- #
 def img_o_placeholder(c, path, x, y, w, h, caption):
+    """Disegna l'immagine del tetto (o un placeholder) riempiendo SEMPRE tutto il box.
+
+    L'immagine e' resa in modalita' "cover": scalata col fattore max(w/iw, h/ih) cosi'
+    da coprire interamente il riquadro qualunque siano le proporzioni di immagine e box
+    (la Solar API restituisce immagini quadrate; il box e' panoramico), e l'eccedenza
+    viene ritagliata dal clip arrotondato. Sotto si dipinge comunque uno sfondo neutro,
+    cosi' che in nessun caso (immagine assente, draw fallito, proporzioni anomale) resti
+    visibile dello sfondo scuro della pagina.
+    """
     from reportlab.lib.utils import ImageReader
     r = 8
+    drawn = False
     if path:
         try:
             ir = ImageReader(path)
             iw, ih = ir.getSize()
-            scale = max(w / iw, h / ih)          # "cover": riempie il riquadro
-            dw, dh = iw * scale, ih * scale
-            dx, dy = x + (w - dw) / 2, y + (h - dh) / 2
-            c.saveState()
-            clip = c.beginPath()
-            clip.roundRect(x, y, w, h, r)
-            c.clipPath(clip, stroke=0, fill=0)   # l'eccedenza viene ritagliata
-            c.drawImage(ir, dx, dy, dw, dh, mask="auto")
-            c.restoreState()
+            if iw and ih:
+                scale = max(w / iw, h / ih)      # cover: copre sempre tutto il box
+                dw, dh = iw * scale, ih * scale
+                dx, dy = x + (w - dw) / 2, y + (h - dh) / 2
+                c.saveState()
+                clip = c.beginPath()
+                clip.roundRect(x, y, w, h, r)
+                c.clipPath(clip, stroke=0, fill=0)
+                c.setFillColor(_hex("#E9EDF0"))   # fondo neutro: niente zone scoperte
+                c.rect(x, y, w, h, stroke=0, fill=1)
+                c.drawImage(ir, dx, dy, dw, dh, mask="auto")
+                c.restoreState()
+                drawn = True
         except Exception:
-            path = None
-    if not path:
+            drawn = False
+    if not drawn:
         c.setFillColor(_hex("#E9EDF0"))
         c.roundRect(x, y, w, h, r, stroke=0, fill=1)
         c.setFillColor(_hex("#9AA6B0"))
