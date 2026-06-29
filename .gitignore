@@ -23,6 +23,9 @@ parametri.bak.json
 # PDF di preventivo generati (contengono dati cliente)
 preventivi_pdf/
 
+# Cache immagini satellitari dei tetti (dati cliente + costo API)
+tetti_cache/
+
 # =============================================================================
 # Artefatti Python
 # =============================================================================
