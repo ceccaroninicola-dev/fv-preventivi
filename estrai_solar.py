@@ -4,6 +4,7 @@ Estrattore completo dati Solar: legge i JSON grezzi in solar_raw/ e produce
 un estratto leggibile con TUTTI i campi utili per il preventivo.
 
 - Input:  solar_raw/<ID>.json  (grezzi dello step 3) + clienti_solar.csv
+          + clienti_geocodificati.csv (per propagare LAT/LNG, match per ID_CLIENTE)
 - Output: clienti_solar_completo.csv  (un cliente per riga, campi espansi)
           + stampa a video un esempio dettagliato per i primi clienti
 - Solo libreria standard.
@@ -17,6 +18,7 @@ import glob
 
 RAW_DIR = "solar_raw"
 BASE_CSV = "clienti_solar.csv"
+GEO_CSV = "clienti_geocodificati.csv"   # da qui vengono LAT/LNG (scritte dallo step 2)
 OUT_CSV = "clienti_solar_completo.csv"
 
 
@@ -97,17 +99,26 @@ def main():
         for r in csv.DictReader(open(BASE_CSV, encoding="utf-8")):
             base[r["ID_CLIENTE"]] = r
 
+    # LAT/LNG: dallo step 2 (clienti_geocodificati.csv), match per ID_CLIENTE
+    geo = {}
+    if os.path.exists(GEO_CSV):
+        for r in csv.DictReader(open(GEO_CSV, encoding="utf-8")):
+            geo[r["ID_CLIENTE"]] = r
+
     righe = []
     for fp in files:
         cid = os.path.splitext(os.path.basename(fp))[0]
         data = json.load(open(fp, encoding="utf-8"))
         ext = estrai_cliente(data)
         b = base.get(cid, {})
+        g = geo.get(cid, {})
         riga = {
             "ID_CLIENTE": cid,
             "NOME": b.get("NOME", ""),
             "SEGMENTO": b.get("SEGMENTO", ""),
             "COMUNE": b.get("COMUNE", ""),
+            "LAT": g.get("LAT", b.get("LAT", "")),
+            "LNG": g.get("LNG", b.get("LNG", "")),
             "CONSUMO_KWH_ANNO": b.get("CONSUMO_KWH_ANNO", ""),
             "POTENZA_DISP_KW": b.get("POTENZA_DISP_KW", ""),
         }
