@@ -63,6 +63,36 @@ privati): vengono rifiutate con un messaggio.
   crash**: ripiega su una scritta bianca "SGR" nella testata e segnala l'avviso su
   `stderr`. In quel caso basta installare `svglib` (`py -m pip install svglib`).
 
-Il contenuto del PDF (una pagina): testata azzurra con logo + titolo, dati cliente,
-impianto proposto, riepilogo economico in evidenza, grafico del guadagno cumulato sui
-20 anni e il disclaimer "Stima indicativa soggetta a sopralluogo tecnico."
+Il PDF (una pagina) e' pensato per **vendere**, con gerarchia visiva forte:
+
+- testata azzurra con logo SGR bianco + titolo;
+- **numero eroe** in grande: tempo di rientro e guadagno a 20 anni;
+- **confronto spesa** energia oggi vs con il fotovoltaico (vedi nota sotto) + badge di
+  risparmio percentuale;
+- **immagine satellitare del tetto** (vedi sotto);
+- riga compatta dell'impianto proposto (kWp, n. pannelli + modello, produzione);
+- **grafico** del guadagno cumulato a 20 anni: parte negativo (area rossa), attraversa
+  lo zero al **punto di pareggio** (evidenziato) e sale (area verde) fino al guadagno
+  finale;
+- fascia fiducia (garanzia di potenza, modello, detrazione) e disclaimer obbligatorio
+  "Stima indicativa soggetta a sopralluogo tecnico."
+
+### Spesa "oggi"
+
+Il CSV non contiene una colonna di spesa annua: la spesa attuale e' quindi **stimata**
+come `CONSUMO_KWH_ANNO * prezzo_elettricita` (da `config.py`) e marcata "(stima)" sul
+PDF. La spesa "dopo" e' `spesa attuale - RISPARMIO_ANNUO_ANNO1`. Se il consumo manca, il
+blocco mostra "n/d" senza errori.
+
+### Immagine satellitare del tetto
+
+- Scaricata dalla **Google Static Maps API** usando `LAT`/`LNG` del CSV (dallo step 2) e
+  la chiave `os.environ["GOOGLE_MAPS_KEY"]` (la stessa degli altri step), con
+  `maptype=satellite`, `zoom=20`, `size=600x400`.
+- **Cache obbligatoria** in `tetti_cache/<ID>.png`: l'immagine viene scaricata una sola
+  volta per cliente (ogni chiamata costa ~0,002 €).
+- Se la chiave o le coordinate mancano, o il download fallisce, il PDF si genera
+  comunque con un **placeholder grigio** (nessun crash).
+
+> I PDF (`preventivi_pdf/`) e le immagini dei tetti (`tetti_cache/`) contengono dati
+> cliente: sono esclusi dal `.gitignore` e non vanno mai committati.
