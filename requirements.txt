@@ -8,3 +8,12 @@
 
 reportlab        # generazione del PDF
 svglib           # converte il logo SVG in vettoriale per reportlab (niente cairo necessario)
+pillow           # converte il GeoTIFF (Solar API rgbUrl) del tetto in PNG
+
+# Fallback opzionale: se Pillow non legge il GeoTIFF del tetto su Windows,
+# installa anche tifffile (lo step lo usa automaticamente come ripiego).
+# Per i GeoTIFF compressi tifffile richiede anche imagecodecs:
+#   py -m pip install tifffile numpy imagecodecs
+# tifffile
+# numpy
+# imagecodecs

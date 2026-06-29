@@ -13,19 +13,25 @@ Uso (Windows):
     py step6_pdf.py <ID_CLIENTE>     genera il PDF di quel cliente
     py step6_pdf.py                  genera il PDF del primo privato valido (prova)
 
-Librerie non standard (le uniche del progetto): reportlab + svglib.
-    pip install reportlab svglib --break-system-packages
+Librerie non standard: reportlab + svglib (PDF) e Pillow (conversione immagine).
+    pip install reportlab svglib pillow --break-system-packages
 
-Immagine satellitare del tetto: scaricata dalla Google Static Maps API usando
-LAT/LNG del CSV e la chiave os.environ["GOOGLE_MAPS_KEY"]; messa in cache in
-tetti_cache/<ID>.png per non ripagarla. Se chiave/coordinate mancano o il
-download fallisce, si usa un placeholder grigio (nessun crash).
+Immagine aerea del tetto: presa dalla Google SOLAR API (in Europa risponde, a
+differenza di Static Maps maptype=satellite, disabilitato nel SEE). Flusso:
+  1. dataLayers:get con LAT/LNG, radiusMeters ~35, view=IMAGERY_LAYERS e la chiave
+     os.environ["GOOGLE_MAPS_KEY"];
+  2. dalla risposta si legge "rgbUrl" e si scarica quel layer (GeoTIFF) con ?key=...;
+  3. il GeoTIFF viene convertito in PNG (Pillow; fallback tifffile) e messo in cache
+     in tetti_cache/<ID>.png per non ripagare la chiamata (~0,075 € l'una).
+Se chiave/coordinate mancano, la chiamata fallisce o non c'e' copertura immagine,
+si usa il placeholder grigio (nessun crash). Nessun pannello disegnato sopra.
 
 Solo PRIVATI: le aziende vengono rifiutate con un messaggio.
 """
 import os
 import sys
 import csv
+import json
 import urllib.request
 import urllib.parse
 import config as C
@@ -45,9 +51,10 @@ MODELLO_PANNELLO = C.PANNELLO["modello"]
 GARANZIA_ANNI = C.PANNELLO.get("garanzia_potenza_anni")
 PREZZO_ELETTRICITA = C.PREZZO_ELETTRICITA
 
-# Static Maps
-SAT_ZOOM = 20
-SAT_SIZE = "600x400"
+# Google Solar API (l'immagine aerea del tetto: in Europa risponde, a differenza di
+# Static Maps maptype=satellite che e' disabilitato nel SEE).
+SOLAR_DATALAYERS = "https://solar.googleapis.com/v1/dataLayers:get"
+RADIUS_METERS = 35   # piccolo: inquadra il singolo tetto
 
 # --- colori brand ---
 BRAND = "#3BA9DD"
@@ -124,42 +131,120 @@ def anno_pareggio(gains):
 
 
 # --------------------------------------------------------------------------- #
-# Immagine satellitare del tetto (Google Static Maps) + cache
+# Immagine aerea del tetto (Google Solar API: dataLayers -> rgbUrl GeoTIFF) + cache
 # --------------------------------------------------------------------------- #
+def _http_json(url, timeout=20):
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            if r.status != 200:
+                return None
+            return json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        sys.stderr.write(f"[avviso] Solar API dataLayers non raggiungibile ({e}).\n")
+        return None
+
+
+def _http_bytes(url, timeout=30):
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            if r.status != 200:
+                return None
+            return r.read()
+    except Exception as e:
+        sys.stderr.write(f"[avviso] download layer RGB fallito ({e}).\n")
+        return None
+
+
+def _append_key(url, key):
+    """Aggiunge ?key=... (o &key=...) all'URL del layer restituito da dataLayers."""
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}key={urllib.parse.quote(key)}"
+
+
+def _tiff_to_png(data, out_path):
+    """Converte i byte di un GeoTIFF RGB in PNG quadrato (centrato sul tetto).
+    Primario: Pillow. Fallback: tifffile -> Pillow. Ritorna True se riuscito."""
+    from io import BytesIO
+    im = None
+    try:
+        from PIL import Image
+        im = Image.open(BytesIO(data))
+        im.load()
+        im = im.convert("RGB")
+    except Exception:
+        im = None
+    if im is None:
+        try:
+            import numpy as np
+            import tifffile
+            from PIL import Image
+            arr = tifffile.imread(BytesIO(data))
+            # bande-prima (3,H,W) -> bande-dopo (H,W,3)
+            if arr.ndim == 3 and arr.shape[0] in (3, 4) and arr.shape[-1] not in (3, 4):
+                arr = np.moveaxis(arr, 0, -1)
+            arr = arr[..., :3]
+            if arr.dtype != np.uint8:
+                a = arr.astype("float32")
+                mx = float(a.max()) or 1.0
+                arr = (a / mx * 255).clip(0, 255).astype("uint8")
+            im = Image.fromarray(arr, "RGB")
+        except Exception as e:
+            sys.stderr.write(f"[avviso] conversione GeoTIFF fallita ({e}).\n")
+            return False
+    # ritaglio quadrato centrato (il punto cliente e' al centro dell'immagine)
+    w, h = im.size
+    s = min(w, h)
+    left, top = (w - s) // 2, (h - s) // 2
+    im = im.crop((left, top, left + s, top + s))
+    im.save(out_path, "PNG")
+    return True
+
+
 def scarica_tetto(lat, lng, cid):
-    """Ritorna il percorso PNG del tetto (da cache o scaricato), oppure None."""
+    """Percorso PNG del tetto (da cache o dalla Solar API), oppure None.
+
+    Cache obbligatoria: se tetti_cache/<cid>.png esiste, NON richiama l'API.
+    """
     if not cid:
         return None
     os.makedirs(TETTI_DIR, exist_ok=True)
     path = os.path.join(TETTI_DIR, f"{cid}.png")
     if os.path.exists(path) and os.path.getsize(path) > 0:
         return path
+
     key = os.environ.get("GOOGLE_MAPS_KEY")
     if not key or lat is None or lng is None:
         return None
+
+    # 1) dataLayers:get -> metadati con gli URL dei layer
     params = urllib.parse.urlencode({
-        "center": f"{lat},{lng}",
-        "zoom": SAT_ZOOM,
-        "size": SAT_SIZE,
-        "maptype": "satellite",
+        "location.latitude": lat,
+        "location.longitude": lng,
+        "radiusMeters": RADIUS_METERS,
+        "view": "IMAGERY_LAYERS",
         "key": key,
     })
-    url = "https://maps.googleapis.com/maps/api/staticmap?" + params
-    try:
-        with urllib.request.urlopen(url, timeout=15) as resp:
-            if resp.status != 200:
-                return None
-            if not resp.headers.get("Content-Type", "").startswith("image"):
-                return None
-            data = resp.read()
-        if not data:
-            return None
-        with open(path, "wb") as f:
-            f.write(data)
-        return path
-    except Exception as e:
-        sys.stderr.write(f"[avviso] immagine tetto non scaricata ({e}).\n")
+    meta = _http_json(f"{SOLAR_DATALAYERS}?{params}")
+    if not meta:
+        return None  # errore o nessuna copertura per quel punto
+
+    # 2) layer RGB
+    rgb_url = meta.get("rgbUrl")
+    if not rgb_url:
+        sys.stderr.write("[avviso] Solar API: nessun layer RGB (rgbUrl) per questo punto.\n")
         return None
+
+    # 3) scarica il GeoTIFF (chiave da appendere all'URL del layer)
+    data = _http_bytes(_append_key(rgb_url, key))
+    if not data:
+        return None
+
+    # 4) GeoTIFF -> PNG in cache
+    if not _tiff_to_png(data, path):
+        if os.path.exists(path) and os.path.getsize(path) == 0:
+            os.remove(path)
+        return None
+    return path
 
 
 # --------------------------------------------------------------------------- #
@@ -195,12 +280,16 @@ def img_o_placeholder(c, path, x, y, w, h, caption):
     r = 8
     if path:
         try:
+            ir = ImageReader(path)
+            iw, ih = ir.getSize()
+            scale = max(w / iw, h / ih)          # "cover": riempie il riquadro
+            dw, dh = iw * scale, ih * scale
+            dx, dy = x + (w - dw) / 2, y + (h - dh) / 2
             c.saveState()
             clip = c.beginPath()
             clip.roundRect(x, y, w, h, r)
-            c.clipPath(clip, stroke=0, fill=0)
-            c.drawImage(ImageReader(path), x, y, w, h,
-                        preserveAspectRatio=True, anchor="c", mask="auto")
+            c.clipPath(clip, stroke=0, fill=0)   # l'eccedenza viene ritagliata
+            c.drawImage(ir, dx, dy, dw, dh, mask="auto")
             c.restoreState()
         except Exception:
             path = None
