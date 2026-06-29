@@ -20,6 +20,9 @@ parametri.bak.json
 *_Estratto*.xlsx
 *_Estratti*.xlsx
 
+# PDF di preventivo generati (contengono dati cliente)
+preventivi_pdf/
+
 # =============================================================================
 # Artefatti Python
 # =============================================================================
