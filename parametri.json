@@ -1,0 +1,132 @@
+{
+  "_nota": "Parametri commerciali pipeline FV. Modificabili dal pannello web (pannello.py) o a mano. Il motore li legge da qui.",
+  "pannello": {
+    "modello": "Trina Solar Vertex S+ TSM-460NEG9R.28",
+    "potenza_wp": 460,
+    "area_m2": 2.0,
+    "efficienza": 0.23,
+    "degradazione_primo_anno": 0.01,
+    "degradazione_annua": 0.004,
+    "garanzia_potenza_anni": 30
+  },
+  "tecnici": {
+    "producibilita_kwh_per_kwp": 1250,
+    "perdite_sistema": 0.14
+  },
+  "privati": {
+    "listino": {
+      "3": 5009,
+      "4": 5982,
+      "5": 6864,
+      "6": 7664
+    },
+    "max_kwp": 6,
+    "copertura_minima": 0.8
+  },
+  "aziende": {
+    "fasce": [
+      {
+        "kwp_min": 0,
+        "kwp_max": 20,
+        "prezzo_per_kwp": null
+      },
+      {
+        "kwp_min": 20,
+        "kwp_max": 50,
+        "prezzo_per_kwp": null
+      },
+      {
+        "kwp_min": 50,
+        "kwp_max": 100,
+        "prezzo_per_kwp": null
+      },
+      {
+        "kwp_min": 100,
+        "kwp_max": 200,
+        "prezzo_per_kwp": null
+      },
+      {
+        "kwp_min": 200,
+        "kwp_max": 300,
+        "prezzo_per_kwp": null
+      },
+      {
+        "kwp_min": 300,
+        "kwp_max": 400,
+        "prezzo_per_kwp": null
+      },
+      {
+        "kwp_min": 400,
+        "kwp_max": 500,
+        "prezzo_per_kwp": null
+      },
+      {
+        "kwp_min": 500,
+        "kwp_max": 1000,
+        "prezzo_per_kwp": null
+      }
+    ],
+    "modello_prezzo": "flat_per_fascia"
+  },
+  "accumulo": {
+    "listino": {
+      "5": 2636,
+      "10": 4409,
+      "15": 6191
+    },
+    "dod": 0.9,
+    "garanzia": "10 anni / 6.000 cicli"
+  },
+  "economici": {
+    "prezzo_elettricita": 0.28,
+    "prezzo_gas": 1.1,
+    "inflazione_energia": 0.03,
+    "autoconsumo_senza_batteria": 0.35,
+    "autoconsumo_con_batteria": 0.7
+  },
+  "detrazioni": {
+    "privati_aliquota": 0.5,
+    "privati_anni": 10
+  },
+  "pompe_calore": {
+    "8": {
+      "prezzo": 12409.09,
+      "scop": 4.5
+    },
+    "9": {
+      "prezzo": 13181.82,
+      "scop": 4.82
+    },
+    "10": {
+      "prezzo": 13545.45,
+      "scop": 4.73
+    }
+  },
+  "ibrido": [
+    {
+      "pdc_kw": 4,
+      "caldaia_kw": 28,
+      "prezzo": 7090.91
+    },
+    {
+      "pdc_kw": 6,
+      "caldaia_kw": 24,
+      "prezzo": 9181.82
+    },
+    {
+      "pdc_kw": 8,
+      "caldaia_kw": 24,
+      "prezzo": 9772.73
+    },
+    {
+      "pdc_kw": 8,
+      "caldaia_kw": 28,
+      "prezzo": 9954.55
+    },
+    {
+      "pdc_kw": 8,
+      "caldaia_kw": 35,
+      "prezzo": 10136.36
+    }
+  ]
+}
