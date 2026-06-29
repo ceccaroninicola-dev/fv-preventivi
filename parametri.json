@@ -82,7 +82,8 @@
     "prezzo_gas": 1.1,
     "inflazione_energia": 0.03,
     "autoconsumo_senza_batteria": 0.35,
-    "autoconsumo_con_batteria": 0.7
+    "autoconsumo_con_batteria": 0.7,
+    "valore_immissione_eur_kwh": 0.1
   },
   "detrazioni": {
     "privati_aliquota": 0.5,
