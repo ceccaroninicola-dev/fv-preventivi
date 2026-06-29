@@ -1,0 +1,51 @@
+# =============================================================================
+# DATI CLIENTI - NON committare MAI (vincolo GDPR)
+# Questo progetto tratta dati personali di clienti reali (nomi, indirizzi,
+# consumi). Tali dati non devono finire nel repository, nemmeno se privato.
+# =============================================================================
+
+# JSON con dati grezzi per cliente
+solar_raw/
+
+# Output CSV con dati reali dei clienti
+clienti_*.csv
+
+# Cache geocodifica (indirizzi)
+geocode_cache.json
+
+# Backup parametri (può contenere dati sensibili)
+parametri.bak.json
+
+# File di export Excel originali con dati clienti
+*_Estratto*.xlsx
+*_Estratti*.xlsx
+
+# =============================================================================
+# Artefatti Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Ambienti virtuali
+.venv/
+venv/
+env/
+ENV/
+
+# Cache strumenti
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# =============================================================================
+# IDE / sistema operativo
+# =============================================================================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
