@@ -37,6 +37,7 @@ ACCUMULO_DOD = _P["accumulo"]["dod"]
 PREZZO_ELETTRICITA = _P["economici"]["prezzo_elettricita"]
 PREZZO_GAS = _P["economici"]["prezzo_gas"]
 INFLAZIONE_ENERGIA = _P["economici"]["inflazione_energia"]
+VALORE_IMMISSIONE = _P["economici"]["valore_immissione_eur_kwh"]
 AUTOCONSUMO = {
     "senza_batteria": _P["economici"]["autoconsumo_senza_batteria"],
     "con_batteria": _P["economici"]["autoconsumo_con_batteria"],
