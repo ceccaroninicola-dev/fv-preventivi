@@ -84,15 +84,28 @@ come `CONSUMO_KWH_ANNO * prezzo_elettricita` (da `config.py`) e marcata "(stima)
 PDF. La spesa "dopo" e' `spesa attuale - RISPARMIO_ANNUO_ANNO1`. Se il consumo manca, il
 blocco mostra "n/d" senza errori.
 
-### Immagine satellitare del tetto
+### Immagine aerea del tetto (Google Solar API)
 
-- Scaricata dalla **Google Static Maps API** usando `LAT`/`LNG` del CSV (dallo step 2) e
-  la chiave `os.environ["GOOGLE_MAPS_KEY"]` (la stessa degli altri step), con
-  `maptype=satellite`, `zoom=20`, `size=600x400`.
-- **Cache obbligatoria** in `tetti_cache/<ID>.png`: l'immagine viene scaricata una sola
-  volta per cliente (ogni chiamata costa ~0,002 €).
-- Se la chiave o le coordinate mancano, o il download fallisce, il PDF si genera
-  comunque con un **placeholder grigio** (nessun crash).
+In area europea (SEE) Google ha disabilitato `Static Maps maptype=satellite`
+(HTTP 403). L'immagine del tetto viene quindi presa dalla **Google Solar API**, che in
+Europa risponde. Flusso (in `step6_pdf.py`):
+
+1. `GET https://solar.googleapis.com/v1/dataLayers:get` con `location.latitude`/
+   `location.longitude` (dalle colonne `LAT`/`LNG` del CSV), `radiusMeters=35`,
+   `view=IMAGERY_LAYERS` e la chiave `os.environ["GOOGLE_MAPS_KEY"]`.
+2. Dalla risposta si legge il campo **`rgbUrl`** e si scarica quel layer (un **GeoTIFF**)
+   appendendo `?key=...` all'URL.
+3. Il GeoTIFF viene convertito in **PNG** con **Pillow** (ritaglio quadrato centrato sul
+   tetto) e salvato in cache. *Niente pannelli disegnati sopra: solo l'immagine pulita.*
+   - Se Pillow non legge quel GeoTIFF su Windows, lo step usa come **fallback**
+     `tifffile` + `numpy` (per i TIFF compressi serve anche `imagecodecs`):
+     `py -m pip install tifffile numpy imagecodecs`.
+
+- **Cache obbligatoria** in `tetti_cache/<ID>.png`: se il PNG esiste gia', l'API **non**
+  viene richiamata (ogni `dataLayers` costa ~0,075 €, da pagare una sola volta per cliente).
+- Se la chiave o le coordinate mancano, la chiamata fallisce, oppure per quel punto **non
+  c'e' copertura immagine** (nessun `rgbUrl`), il PDF si genera comunque con un
+  **placeholder grigio** (nessun crash).
 
 > I PDF (`preventivi_pdf/`) e le immagini dei tetti (`tetti_cache/`) contengono dati
 > cliente: sono esclusi dal `.gitignore` e non vanno mai committati.
