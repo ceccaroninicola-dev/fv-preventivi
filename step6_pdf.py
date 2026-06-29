@@ -54,7 +54,9 @@ PREZZO_ELETTRICITA = C.PREZZO_ELETTRICITA
 # Google Solar API (l'immagine aerea del tetto: in Europa risponde, a differenza di
 # Static Maps maptype=satellite che e' disabilitato nel SEE).
 SOLAR_DATALAYERS = "https://solar.googleapis.com/v1/dataLayers:get"
-RADIUS_METERS = 35   # piccolo: inquadra il singolo tetto
+RADIUS_METERS = 35        # raggio richiesto alla Solar API (taratura inquadratura)
+CENTER_CROP_FRAC = 0.65   # porzione centrale tenuta dopo lo scarico (zoom sull'edificio)
+NODATA_SOGLIA = 14        # tolleranza colore per ritagliare le fasce "no data" ai bordi
 
 # --- colori brand ---
 BRAND = "#3BA9DD"
@@ -161,8 +163,37 @@ def _append_key(url, key):
     return f"{url}{sep}key={urllib.parse.quote(key)}"
 
 
+def _ritaglia_nodata(im, soglia=NODATA_SOGLIA):
+    """Ritaglia le fasce uniformi 'no data' ai bordi del GeoTIFF (di qualsiasi tinta:
+    grigio, nero...). Tecnica: si prende il colore di un angolo come riferimento, si
+    calcola la differenza pixel-pixel e si tiene il bounding box di cio' che se ne
+    discosta oltre 'soglia'. Robusto perche' non assume il valore esatto del no-data.
+    """
+    from PIL import Image, ImageChops
+    sfondo = Image.new("RGB", im.size, im.getpixel((0, 0)))
+    diff = ImageChops.difference(im, sfondo).convert("L")
+    maschera = diff.point(lambda p: 255 if p > soglia else 0)
+    bbox = maschera.getbbox()
+    if bbox:
+        w, h = im.size
+        bw, bh = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        if bw * bh >= 0.05 * w * h:   # evita crop su artefatti minuscoli (immagine quasi tutta uniforme)
+            return im.crop(bbox)
+    return im
+
+
+def _crop_centrale(im, frac=CENTER_CROP_FRAC):
+    """Tiene la porzione centrale (frac di larghezza e altezza): zoom sull'edificio."""
+    frac = max(0.1, min(1.0, frac))
+    w, h = im.size
+    cw, ch = max(1, int(w * frac)), max(1, int(h * frac))
+    left, top = (w - cw) // 2, (h - ch) // 2
+    return im.crop((left, top, left + cw, top + ch))
+
+
 def _tiff_to_png(data, out_path):
-    """Converte i byte di un GeoTIFF RGB in PNG quadrato (centrato sul tetto).
+    """Converte i byte di un GeoTIFF RGB in PNG, rimuovendo le fasce no-data ai bordi
+    e zoomando sull'edificio (crop centrale).
     Primario: Pillow. Fallback: tifffile -> Pillow. Ritorna True se riuscito."""
     from io import BytesIO
     im = None
@@ -191,11 +222,9 @@ def _tiff_to_png(data, out_path):
         except Exception as e:
             sys.stderr.write(f"[avviso] conversione GeoTIFF fallita ({e}).\n")
             return False
-    # ritaglio quadrato centrato (il punto cliente e' al centro dell'immagine)
-    w, h = im.size
-    s = min(w, h)
-    left, top = (w - s) // 2, (h - s) // 2
-    im = im.crop((left, top, left + s, top + s))
+    # 1) via le fasce no-data ai bordi  2) zoom sull'edificio (porzione centrale)
+    im = _ritaglia_nodata(im)
+    im = _crop_centrale(im)
     im.save(out_path, "PNG")
     return True
 
