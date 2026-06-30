@@ -26,6 +26,9 @@ preventivi_pdf/
 # Cache immagini satellitari dei tetti (dati cliente + costo API)
 tetti_cache/
 
+# Log dei clienti rimasti senza immagine del tetto (contiene ID cliente)
+tetti_falliti.csv
+
 # =============================================================================
 # Artefatti Python
 # =============================================================================

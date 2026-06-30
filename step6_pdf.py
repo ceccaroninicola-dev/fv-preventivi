@@ -32,14 +32,19 @@ import os
 import sys
 import csv
 import json
+import time
+import socket
 import urllib.request
 import urllib.parse
+import urllib.error
+from datetime import datetime
 import config as C
 
 INPUT = "clienti_finanziario.csv"
 OUTPUT_DIR = "preventivi_pdf"
 TETTI_DIR = "tetti_cache"
 RAW_DIR = "solar_raw"            # JSON grezzi buildingInsights (centro/boundingBox edificio)
+FALLITI_CSV = "tetti_falliti.csv"   # log dei clienti rimasti senza immagine (per ri-processare)
 LOGO_SVG = "logo.f586e6.svg"
 
 DISCLAIMER = "Stima indicativa soggetta a sopralluogo tecnico."
@@ -57,7 +62,9 @@ PREZZO_ELETTRICITA = C.PREZZO_ELETTRICITA
 SOLAR_DATALAYERS = "https://solar.googleapis.com/v1/dataLayers:get"
 RADIUS_METERS = 35        # raggio richiesto alla Solar API (immagine contenuta, ~70 m di lato)
 MARGINE_EDIFICIO = 0.35   # contorno tenuto attorno al boundingBox dell'edificio nel crop
-HTTP_TIMEOUT = 30         # secondi per chiamata (un solo tentativo: feature opzionale, no retry)
+HTTP_TIMEOUT = 30         # secondi per singolo tentativo
+RETRY_TENTATIVI = 3       # ritenta fino a 3 volte (oltre al primo) solo su rete/timeout
+RETRY_BACKOFF = 2         # attesa crescente tra i tentativi: 2s, 4s, 8s
 
 # --- colori brand ---
 BRAND = "#3BA9DD"
@@ -166,26 +173,55 @@ def anno_pareggio(gains):
 # --------------------------------------------------------------------------- #
 # Immagine aerea del tetto (Google Solar API: dataLayers -> rgbUrl GeoTIFF) + cache
 # --------------------------------------------------------------------------- #
-def _http_json(url, timeout=HTTP_TIMEOUT):
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as r:
-            if r.status != 200:
-                return None
-            return json.loads(r.read().decode("utf-8"))
-    except Exception as e:
-        sys.stderr.write(f"[avviso] Solar API dataLayers non raggiungibile ({e}).\n")
-        return None
+def _scarica(url):
+    """Scarica i byte di un URL con retry su errori di rete/timeout.
+    Ritorna (dati|None, esito) con esito in:
+      - "OK"             : dati scaricati
+      - "TIMEOUT"        : timeout/errore di rete dopo tutti i tentativi (ri-processabile)
+      - "NON_DISPONIBILE": il dato non esiste (404 / 4xx) -> inutile insistere
+      - "ALTRO"          : errore non di rete
+    Ritenta SOLO su timeout/rete e su 5xx/429; NON ritenta su 4xx/dato assente."""
+    esito = "ALTRO"
+    for tentativo in range(RETRY_TENTATIVI + 1):   # 1 iniziale + RETRY_TENTATIVI ritentativi
+        try:
+            with urllib.request.urlopen(url, timeout=HTTP_TIMEOUT) as r:
+                status = getattr(r, "status", 200)
+                if status == 200:
+                    return r.read(), "OK"
+                if status == 429 or 500 <= status < 600:
+                    esito = "TIMEOUT"           # temporaneo -> ritenta
+                else:
+                    return None, "NON_DISPONIBILE"
+        except urllib.error.HTTPError as e:
+            if e.code == 429 or 500 <= e.code < 600:
+                esito = "TIMEOUT"               # temporaneo -> ritenta
+            else:
+                return None, "NON_DISPONIBILE"  # 404 ecc.: dato assente, basta
+        except (socket.timeout, TimeoutError, ConnectionError, urllib.error.URLError):
+            esito = "TIMEOUT"                   # rete/timeout -> ritenta
+        except Exception:
+            return None, "ALTRO"               # non di rete: non insistere
+        if tentativo < RETRY_TENTATIVI:
+            time.sleep(RETRY_BACKOFF * (2 ** tentativo))   # 2s, 4s, 8s
+    return None, esito
 
 
-def _http_bytes(url, timeout=HTTP_TIMEOUT):
+def _motivo_fallimento(esito):
+    return {"TIMEOUT": "TIMEOUT_RETRY_ESAURITI",
+            "NON_DISPONIBILE": "NESSUNA_IMMAGINE"}.get(esito, "ALTRO_ERRORE")
+
+
+def _log_fallito(cid, motivo):
+    """Registra in tetti_falliti.csv il cliente rimasto senza immagine (per ri-processarlo)."""
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as r:
-            if r.status != 200:
-                return None
-            return r.read()
+        nuovo = not os.path.exists(FALLITI_CSV)
+        with open(FALLITI_CSV, "a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if nuovo:
+                w.writerow(["ID_CLIENTE", "MOTIVO", "TIMESTAMP"])
+            w.writerow([cid, motivo, datetime.now().isoformat(timespec="seconds")])
     except Exception as e:
-        sys.stderr.write(f"[avviso] download layer RGB fallito ({e}).\n")
-        return None
+        sys.stderr.write(f"[avviso] impossibile scrivere {FALLITI_CSV} ({e}).\n")
 
 
 def _append_key(url, key):
@@ -354,7 +390,7 @@ def scarica_tetto(lat, lng, cid):
     if not key or lat is None or lng is None:
         return None
 
-    # 1) dataLayers:get -> metadati con gli URL dei layer
+    # 1) dataLayers:get -> metadati con gli URL dei layer (con retry su rete/timeout)
     params = urllib.parse.urlencode({
         "location.latitude": lat,
         "location.longitude": lng,
@@ -362,22 +398,30 @@ def scarica_tetto(lat, lng, cid):
         "view": "IMAGERY_LAYERS",
         "key": key,
     })
-    meta = _http_json(f"{SOLAR_DATALAYERS}?{params}")
-    if not meta:
-        return None  # errore o nessuna copertura per quel punto
-
-    # 2) layer RGB
-    rgb_url = meta.get("rgbUrl")
-    if not rgb_url:
-        sys.stderr.write("[avviso] Solar API: nessun layer RGB (rgbUrl) per questo punto.\n")
+    raw, esito = _scarica(f"{SOLAR_DATALAYERS}?{params}")
+    if esito != "OK":
+        _log_fallito(cid, _motivo_fallimento(esito))
+        return None
+    try:
+        meta = json.loads(raw.decode("utf-8"))
+    except Exception:
+        _log_fallito(cid, "ALTRO_ERRORE")
         return None
 
-    # 3) scarica il GeoTIFF (chiave da appendere all'URL del layer) e decodifica
-    data = _http_bytes(_append_key(rgb_url, key))
-    if not data:
+    # 2) layer RGB. Niente rgbUrl = nessuna copertura immagine: ci si arrende subito (no retry).
+    rgb_url = meta.get("rgbUrl")
+    if not rgb_url:
+        _log_fallito(cid, "NESSUNA_IMMAGINE")
+        return None
+
+    # 3) scarica il GeoTIFF (chiave da appendere all'URL del layer), con retry
+    data, esito = _scarica(_append_key(rgb_url, key))
+    if esito != "OK":
+        _log_fallito(cid, _motivo_fallimento(esito))
         return None
     im, geo2px = _decode_tiff(data)
     if im is None:
+        _log_fallito(cid, "ALTRO_ERRORE")
         return None
 
     # 4) inquadra sull'edificio. Mappatura geo->pixel: prima dai tag GeoTIFF (geo2px),
