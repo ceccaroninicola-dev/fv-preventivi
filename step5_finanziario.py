@@ -68,6 +68,10 @@ def calcola(produzione, prezzo):
     valore_immissione = immessa * VALORE_IMMISSIONE
     risparmio_anno1 = risparmio_autoconsumo + valore_immissione
 
+    # Detrazione 50% per TUTTI i privati: vale anche per i domestici trifase sopra 6 kWp il
+    # cui PREZZO arriva dalle fasce aziende. Il prezzo viene dalle fasce, ma il trattamento
+    # fiscale resta privato. Nessuna condizione sui 20 kWp: il dimensionamento (step4) ferma
+    # gia' i domestici a max_kwp_domestico, quindi non arrivano mai sopra.
     detrazione = prezzo * DETRAZIONE_ALIQUOTA
     costo_netto = prezzo - detrazione
     payback = costo_netto / risparmio_anno1 if risparmio_anno1 > 0 else None

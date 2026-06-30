@@ -25,7 +25,8 @@ PERDITE_SISTEMA = _P["tecnici"]["perdite_sistema"]
 DERATE_AC = 1 - PERDITE_SISTEMA
 
 LISTINO_PRIVATI = {int(k): v for k, v in _P["privati"]["listino"].items()}
-MAX_KWP_PRIVATI = _P["privati"]["max_kwp"]
+MAX_KWP_PRIVATI = _P["privati"]["max_kwp"]                 # cap monofase (6 kWp) e soglia listino
+MAX_KWP_DOMESTICO = _P["privati"]["max_kwp_domestico"]     # limite invalicabile domestico (20 kWp)
 COPERTURA_MINIMA = _P["privati"]["copertura_minima"]
 
 FASCE_AZIENDE = [(f["kwp_min"], f["kwp_max"], f["prezzo_per_kwp"]) for f in _P["aziende"]["fasce"]]
@@ -62,6 +63,17 @@ def prezzo_impianto(segmento, kwp):
                 return round(eur_kwp * kwp, 2), fascia, ""
         return None, ">1000 kWp", "oltre l'ultima fascia prevista (500-1000)"
     return None, "?", f"segmento sconosciuto: {segmento}"
+
+
+def prezzo_domestico(kwp):
+    """Prezzo per impianto DOMESTICO (cliente privato):
+      - fino a MAX_KWP_PRIVATI (6 kWp): listino privati;
+      - oltre 6 kWp (domestico trifase): prezzo dalle FASCE AZIENDE (per kWp).
+    Restituisce (prezzo|None, taglia/fascia, nota). Il trattamento FISCALE resta privato
+    (la detrazione 50% e' applicata in step5): qui si decide solo il PREZZO."""
+    if kwp <= MAX_KWP_PRIVATI:
+        return prezzo_impianto("PRIVATO", kwp)
+    return prezzo_impianto("AZIENDA", kwp)
 
 
 def prezzo_accumulo(kwh):

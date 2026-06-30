@@ -65,40 +65,70 @@ def dimensiona(row):
     except (ValueError, TypeError):
         pass
 
-    # 1) fabbisogno teorico
+    e_priv = seg.startswith("PRIV")
+
+    # 1) CAP DA CONTATORE (solo domestici), con limite invalicabile max_kwp_domestico.
+    #    monofase (contatore <= 6 kW)  -> cap 6 kWp
+    #    trifase  (contatore  > 6 kW)  -> cap = potenza contatore, comunque <= max_kwp_domestico
+    trifase = False
+    if e_priv:
+        if pot_disp and pot_disp > 6:
+            cap_contatore = min(pot_disp, C.MAX_KWP_DOMESTICO)
+            trifase = True
+        else:
+            cap_contatore = min(C.MAX_KWP_PRIVATI, C.MAX_KWP_DOMESTICO)   # 6
+    else:
+        cap_contatore = None   # aziende: nessun cap domestico
+
+    # 2) fabbisogno teorico
     kwp_necessario = consumo / prod_per_kwp if prod_per_kwp else 0
 
-    # 2) quanto regge il tetto con i NOSTRI pannelli
+    # 3) quanto regge il tetto con i NOSTRI pannelli
     n_pannelli_tetto = math.floor(area_utile / AREA_PANNELLO) if area_utile else 0
     kwp_tetto = n_pannelli_tetto * KWP_PER_PANNELLO
 
-    # 3) kWp consigliato
-    kwp = min(kwp_necessario, kwp_tetto) if kwp_tetto else kwp_necessario
+    # 4) kWp consigliato = minimo tra necessario, tetto e cap contatore
+    kwp_pre = min(kwp_necessario, kwp_tetto) if kwp_tetto else kwp_necessario
+    kwp = kwp_pre if cap_contatore is None else min(kwp_pre, cap_contatore)
+
     if kwp_tetto and kwp_tetto < kwp_necessario:
         flags.append("LIMITATO_DA_TETTO")
 
-    if seg.startswith("PRIV"):
-        if kwp > C.MAX_KWP_PRIVATI:
-            kwp = C.MAX_KWP_PRIVATI
-            flags.append("LIMITATO_CAP_6KWP")
+    # flag sul cap contatore/domestico (solo se il cap e' davvero il vincolo che riduce)
+    if cap_contatore is not None and cap_contatore < kwp_pre - 1e-9:
+        if not trifase:
+            flags.append("LIMITATO_CAP_6KWP")                 # monofase: cap 6 kWp
+        elif cap_contatore >= C.MAX_KWP_DOMESTICO - 1e-9:
+            flags.append("LIMITATO_CAP_DOMESTICO")            # tetto al limite invalicabile (20)
 
     if kwp <= 0:
         return {"KWP_CONSIGLIATO": 0, "FLAG_DIMENS": "NON_DIMENSIONABILE"}
 
-    # n pannelli effettivi e potenza reale installata
+    # n pannelli effettivi e potenza reale installata (senza superare il cap in potenza)
     n_pannelli = max(1, round(kwp / KWP_PER_PANNELLO))
+    if cap_contatore is not None:
+        n_max = int(cap_contatore / KWP_PER_PANNELLO)         # floor: resta <= cap
+        if n_max >= 1 and n_pannelli > n_max:
+            n_pannelli = n_max
     kwp_reale = round(n_pannelli * KWP_PER_PANNELLO, 2)
 
-    # 4) prezzo da listino/fascia
-    prezzo, taglia, nota = C.prezzo_impianto(seg, kwp_reale)
+    # impianto domestico oltre 6 kWp grazie al contatore trifase
+    if e_priv and trifase and kwp_reale > C.MAX_KWP_PRIVATI:
+        flags.append("TRIFASE_OVER6")
+
+    # 5) prezzo: domestici -> listino fino a 6 kWp, fasce aziende oltre; aziende -> fasce
+    if e_priv:
+        prezzo, taglia, nota = C.prezzo_domestico(kwp_reale)
+    else:
+        prezzo, taglia, nota = C.prezzo_impianto(seg, kwp_reale)
     if prezzo is None:
         flags.append("PREZZO_DA_DEFINIRE")
 
-    # 5) produzione e copertura
+    # 6) produzione e copertura
     produzione = round(kwp_reale * prod_per_kwp)
     copertura = round(100 * produzione / consumo) if consumo else ""
 
-    # 6) limite potenza contatore
+    # 7) limite potenza contatore (es. monofase con contatore < 6 kW)
     if pot_disp and kwp_reale > pot_disp:
         flags.append(f"SUPERA_CONTATORE({pot_disp}kW)")
 
