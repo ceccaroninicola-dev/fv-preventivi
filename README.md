@@ -104,12 +104,19 @@ Europa risponde. Flusso (in `step6_pdf.py`):
      `py -m pip install tifffile numpy imagecodecs`.
 3b. **Inquadratura sull'edificio**: su edifici in centro storico o vicini tra loro, il
    raggio fisso rischia di centrare il punto sbagliato (es. un incrocio). Per evitarlo si
-   usa il **`boundingBox` dell'edificio** preso da `buildingInsights:findClosest` (gia'
-   salvato dallo step 3 in `solar_raw/<ID>.json`): confrontando il boundingBox
-   dell'immagine con quello dell'edificio si calcola, in pixel, dove sta l'edificio e si
-   **ritaglia/centra** l'immagine su di esso lasciando un margine di contorno
-   (`MARGINE_EDIFICIO`, ~35%). Se la geometria dell'edificio non e' disponibile, si usa
-   l'immagine intera (fallback, senza crash).
+   **ritaglia e centra** l'immagine sul **`center` dell'edificio** (da
+   `buildingInsights:findClosest`, gia' in `solar_raw/<ID>.json`), con dimensione data dal
+   suo `boundingBox` + un margine di contorno (`MARGINE_EDIFICIO`, ~35%) e una finestra
+   minima. La mappatura geo->pixel usa, in ordine:
+   1. la **georeferenziazione embedded nel GeoTIFF** (tag `ModelPixelScale` +
+      `ModelTiepoint`), che e' la fonte piu' affidabile (estensione reale del file);
+   2. in fallback, il **`boundingBox` dell'immagine** restituito da `dataLayers:get`.
+   Se la geometria dell'edificio non e' disponibile, si usa l'immagine intera (fallback,
+   senza crash). Per diagnosticare l'inquadratura su un caso reale, esegui con la variabile
+   d'ambiente **`STEP6_DEBUG_TETTO=1`**: viene stampato su stderr `img=WxH`,
+   `center_geo`, `center_px` e il `crop` calcolato (il centro edificio deve cadere
+   ~al centro dell'immagine). Nota: la cache va invalidata (cancella `tetti_cache/<ID>.png`)
+   perche' un'immagine gia' in cache **non** viene rigenerata.
 4. Nel PDF l'immagine viene resa in modalita' **"cover"**: scalata col fattore
    `max(w/iw, h/ih)` per **riempire sempre e completamente** il riquadro (la Solar API
    restituisce immagini quadrate, il box e' panoramico), con l'eccedenza ritagliata dal

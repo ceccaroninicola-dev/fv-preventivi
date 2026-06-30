@@ -193,15 +193,41 @@ def _append_key(url, key):
     return f"{url}{sep}key={urllib.parse.quote(key)}"
 
 
+def _georef_da_tags(img):
+    """Mappatura geo->pixel dai tag GeoTIFF (ModelPixelScale + ModelTiepoint), se presenti
+    e in gradi (lat/lng). Ritorna una funzione (lat,lng)->(x,y) o None. Piu' affidabile del
+    boundingBox di dataLayers perche' usa la georeferenziazione embedded nel file."""
+    try:
+        tags = getattr(img, "tag_v2", None)
+        if not tags:
+            return None
+        scale = tags.get(33550)   # ModelPixelScaleTag: (sx, sy, sz)
+        tie = tags.get(33922)     # ModelTiepointTag: (i, j, k, X, Y, Z)
+        if not scale or not tie or len(scale) < 2 or len(tie) < 6:
+            return None
+        sx, sy = float(scale[0]), float(scale[1])
+        i, j, ox, oy = float(tie[0]), float(tie[1]), float(tie[3]), float(tie[4])
+        if not sx or not sy or abs(ox) > 180 or abs(oy) > 90:
+            return None  # scala nulla o CRS non in gradi -> non usare
+
+        def geo2px(lat, lng):
+            return (i + (lng - ox) / sx, j + (oy - lat) / sy)
+        return geo2px
+    except Exception:
+        return None
+
+
 def _decode_tiff(data):
-    """Byte di un GeoTIFF RGB -> immagine PIL (RGB), oppure None.
-    Primario: Pillow. Fallback: tifffile -> Pillow."""
+    """Byte di un GeoTIFF RGB -> (immagine PIL RGB, geo2px|None).
+    geo2px = mappatura (lat,lng)->(x,y) dai tag GeoTIFF, se disponibile.
+    Primario: Pillow. Fallback: tifffile -> Pillow (senza georef dai tag)."""
     from io import BytesIO
     try:
         from PIL import Image
         im = Image.open(BytesIO(data))
         im.load()
-        return im.convert("RGB")
+        geo2px = _georef_da_tags(im)
+        return im.convert("RGB"), geo2px
     except Exception:
         pass
     try:
@@ -216,10 +242,10 @@ def _decode_tiff(data):
             a = arr.astype("float32")
             mx = float(a.max()) or 1.0
             arr = (a / mx * 255).clip(0, 255).astype("uint8")
-        return Image.fromarray(arr, "RGB")
+        return Image.fromarray(arr, "RGB"), None
     except Exception as e:
         sys.stderr.write(f"[avviso] conversione GeoTIFF fallita ({e}).\n")
-        return None
+        return None, None
 
 
 def _bbox_da(box):
@@ -232,9 +258,23 @@ def _bbox_da(box):
         return None
 
 
+def _geo2px_da_bbox(img_bbox, W, H):
+    """Mappatura geo->pixel dal boundingBox dell'immagine (fallback se mancano i tag)."""
+    if not img_bbox:
+        return None
+    s_lat, s_lng, n_lat, n_lng = img_bbox
+    dlat, dlng = (n_lat - s_lat), (n_lng - s_lng)
+    if not dlat or not dlng:
+        return None
+
+    def geo2px(lat, lng):
+        return ((lng - s_lng) / dlng * W, (n_lat - lat) / dlat * H)
+    return geo2px
+
+
 def _geom_edificio(cid):
-    """Legge da solar_raw/<cid>.json (buildingInsights) il boundingBox dell'edificio.
-    Ritorna (sw_lat, sw_lng, ne_lat, ne_lng) o None se non disponibile."""
+    """Da solar_raw/<cid>.json (buildingInsights): centro e boundingBox dell'edificio.
+    Ritorna {'center': (lat, lng), 'bbox': (sw_lat,sw_lng,ne_lat,ne_lng)|None} o None."""
     fp = os.path.join(RAW_DIR, f"{cid}.json")
     if not os.path.exists(fp):
         return None
@@ -243,40 +283,55 @@ def _geom_edificio(cid):
             data = json.load(f)
     except Exception:
         return None
-    return _bbox_da(data.get("boundingBox"))
+    bbox = _bbox_da(data.get("boundingBox"))
+    c = data.get("center") or {}
+    try:
+        center = (float(c["latitude"]), float(c["longitude"]))
+    except (TypeError, KeyError, ValueError):
+        if not bbox:
+            return None
+        center = ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0)
+    return {"center": center, "bbox": bbox}
 
 
-def _crop_su_edificio(im, img_bbox, edificio_bbox, margine=MARGINE_EDIFICIO):
-    """Ritaglia l'immagine RGB (geo-referenziata da img_bbox) attorno al boundingBox
-    dell'edificio, con un margine di contorno. Ritorna l'immagine ritagliata, oppure
-    None se la geometria non e' utilizzabile (-> il chiamante usa l'immagine intera)."""
-    if not img_bbox or not edificio_bbox:
+def _crop_su_edificio(im, geo2px, geom, margine=MARGINE_EDIFICIO, cid=""):
+    """Ritaglia/centra l'immagine sull'edificio: il suo 'center' finisce al CENTRO del
+    ritaglio, con dimensione data dal suo boundingBox + margine (e un minimo). 'geo2px'
+    mappa (lat,lng)->pixel (dai tag GeoTIFF o, in fallback, dal boundingBox immagine).
+    Ritorna l'immagine ritagliata o None (-> il chiamante usa l'immagine intera)."""
+    if geo2px is None or not geom:
         return None
+    import math
     W, H = im.size
-    s_lat, s_lng, n_lat, n_lng = img_bbox
-    dlat, dlng = (n_lat - s_lat), (n_lng - s_lng)
-    if not dlat or not dlng:
-        return None
+    clat, clng = geom["center"]
+    bbox = geom.get("bbox")
+    if bbox:
+        half_lat = (bbox[2] - bbox[0]) / 2.0 * (1 + 2 * margine)
+        half_lng = (bbox[3] - bbox[1]) / 2.0 * (1 + 2 * margine)
+    else:
+        half_lat = half_lng = 0.0
+    m2lat = 1 / 111320.0
+    m2lng = 1 / (111320.0 * max(0.1, math.cos(math.radians(clat))))
+    half_lat = max(half_lat, 12 * m2lat)   # finestra minima ~24 m di lato
+    half_lng = max(half_lng, 12 * m2lng)
 
-    def to_px(lat, lng):
-        x = (lng - s_lng) / dlng * W      # lng cresce verso destra
-        y = (n_lat - lat) / dlat * H      # lat: nord (n_lat) in alto -> y=0
-        return x, y
-
-    bs_lat, bs_lng, bn_lat, bn_lng = edificio_bbox
-    x1, y1 = to_px(bn_lat, bs_lng)        # angolo NO
-    x2, y2 = to_px(bs_lat, bn_lng)        # angolo SE
-    left, right = sorted((x1, x2))
-    top, bottom = sorted((y1, y2))
-    bw, bh = right - left, bottom - top
-    left -= bw * margine
-    right += bw * margine
-    top -= bh * margine
-    bottom += bh * margine
+    cx, cy = geo2px(clat, clng)
+    xa, _ = geo2px(clat, clng - half_lng)
+    xb, _ = geo2px(clat, clng + half_lng)
+    _, ya = geo2px(clat + half_lat, clng)
+    _, yb = geo2px(clat - half_lat, clng)
+    left, right = sorted((xa, xb))
+    top, bottom = sorted((ya, yb))
     left = max(0, left)
     top = max(0, top)
     right = min(W, right)
     bottom = min(H, bottom)
+
+    if os.environ.get("STEP6_DEBUG_TETTO"):
+        sys.stderr.write(
+            f"[debug tetto {cid}] img={W}x{H} center_geo=({clat:.6f},{clng:.6f}) "
+            f"center_px=({cx:.0f},{cy:.0f}) crop=({left:.0f},{top:.0f},{right:.0f},{bottom:.0f})\n")
+
     if right - left < 10 or bottom - top < 10:
         return None
     return im.crop((int(left), int(top), int(right), int(bottom)))
@@ -320,17 +375,19 @@ def scarica_tetto(lat, lng, cid):
     data = _http_bytes(_append_key(rgb_url, key))
     if not data:
         return None
-    im = _decode_tiff(data)
+    im, geo2px = _decode_tiff(data)
     if im is None:
         return None
 
-    # 4) inquadra sull'edificio: boundingBox immagine (da dataLayers) + boundingBox
-    #    edificio (da buildingInsights in solar_raw). Se la geometria manca -> immagine intera.
-    img_bbox = _bbox_da(meta.get("boundingBox"))
-    edificio_bbox = _geom_edificio(cid)
-    ritaglio = _crop_su_edificio(im, img_bbox, edificio_bbox)
-    if ritaglio is None and edificio_bbox is None:
-        sys.stderr.write(f"[info] {cid}: geometria edificio assente, uso l'immagine intera.\n")
+    # 4) inquadra sull'edificio. Mappatura geo->pixel: prima dai tag GeoTIFF (geo2px),
+    #    altrimenti dal boundingBox dell'immagine (da dataLayers). Centro/boundingBox
+    #    dell'edificio da buildingInsights (solar_raw). Se manca -> immagine intera.
+    if geo2px is None:
+        geo2px = _geo2px_da_bbox(_bbox_da(meta.get("boundingBox")), *im.size)
+    geom = _geom_edificio(cid)
+    ritaglio = _crop_su_edificio(im, geo2px, geom, cid=cid)
+    if ritaglio is None and (geo2px is None or geom is None):
+        sys.stderr.write(f"[info] {cid}: geometria non disponibile, uso l'immagine intera.\n")
     (ritaglio or im).save(path, "PNG")
     return path
 
