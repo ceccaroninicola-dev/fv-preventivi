@@ -107,6 +107,36 @@ def e_azienda(seg):
     return (seg or "").upper().startswith("AZIEND")
 
 
+def indirizzo_riga(row):
+    """Riga indirizzo leggibile: 'VIA_CIVICO, CAP COMUNE'.
+    Se quei campi mancano, ripiega su INDIRIZZO_GEOCODING (senza il ', Italia' finale).
+    Ritorna '' se non c'e' nulla."""
+    via = (row.get("VIA_CIVICO") or "").strip()
+    cap = (row.get("CAP") or "").strip()
+    com = (row.get("COMUNE") or "").strip()
+    citta = " ".join(p for p in (cap, com) if p)
+    parti = [p for p in (via, citta) if p]
+    if parti:
+        return ", ".join(parti)
+    indir = (row.get("INDIRIZZO_GEOCODING") or "").strip()
+    if indir:
+        for coda in (", Italia", ", Italy"):
+            if indir.endswith(coda):
+                indir = indir[: -len(coda)]
+        return indir.strip().strip(",").strip()
+    return ""
+
+
+def comune_fornitura_diverso(row):
+    """COMUNE_POD (comune della fornitura) se differisce dal COMUNE (indirizzo legale);
+    None se uguale o mancante. Confronto case-insensitive."""
+    com = (row.get("COMUNE") or "").strip()
+    pod = (row.get("COMUNE_POD") or "").strip()
+    if pod and com and pod.casefold() != com.casefold():
+        return pod
+    return None
+
+
 def curva_guadagno_cumulato(risparmio_anno1, costo_netto):
     """Guadagno netto cumulato anni 1..20 (stessa formula di step5). None se mancano dati."""
     if risparmio_anno1 is None or costo_netto is None:
@@ -534,10 +564,17 @@ def genera_pdf(row, percorso):
         c.setFont("Helvetica-Bold", 9)
         c.drawCentredString(M + left_w - bw / 2, by + 5, f"-{pct}% in bolletta")
 
-    # immagine tetto a destra
-    img_caption = "Il tuo tetto" + (f" - {comune}" if comune else "")
+    # immagine tetto a destra, con indirizzo sotto
+    indir = indirizzo_riga(row)
+    img_caption = indir if indir else ("Il tuo tetto" + (f" - {comune}" if comune else ""))
     tetto_path = scarica_tetto(lat, lng, cid)
     img_o_placeholder(c, tetto_path, right_x, band2_y + 14, right_w, band2_h - 14, img_caption)
+    # se il comune della fornitura (POD) differisce dall'indirizzo legale, segnalalo
+    pod_diverso = comune_fornitura_diverso(row)
+    if pod_diverso:
+        c.setFillColor(_hex(RED))
+        c.setFont("Helvetica-Oblique", 8)
+        c.drawString(right_x + 2, band2_y + 14 - 22, f"(!) comune fornitura diverso: {pod_diverso}")
 
     y = band2_y - 26
 
