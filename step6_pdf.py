@@ -55,8 +55,9 @@ PREZZO_ELETTRICITA = C.PREZZO_ELETTRICITA
 # Google Solar API (l'immagine aerea del tetto: in Europa risponde, a differenza di
 # Static Maps maptype=satellite che e' disabilitato nel SEE).
 SOLAR_DATALAYERS = "https://solar.googleapis.com/v1/dataLayers:get"
-RADIUS_METERS = 35        # raggio richiesto alla Solar API (taratura inquadratura)
+RADIUS_METERS = 35        # raggio richiesto alla Solar API (immagine contenuta, ~70 m di lato)
 MARGINE_EDIFICIO = 0.35   # contorno tenuto attorno al boundingBox dell'edificio nel crop
+HTTP_TIMEOUT = 30         # secondi per chiamata (un solo tentativo: feature opzionale, no retry)
 
 # --- colori brand ---
 BRAND = "#3BA9DD"
@@ -165,7 +166,7 @@ def anno_pareggio(gains):
 # --------------------------------------------------------------------------- #
 # Immagine aerea del tetto (Google Solar API: dataLayers -> rgbUrl GeoTIFF) + cache
 # --------------------------------------------------------------------------- #
-def _http_json(url, timeout=20):
+def _http_json(url, timeout=HTTP_TIMEOUT):
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
             if r.status != 200:
@@ -176,7 +177,7 @@ def _http_json(url, timeout=20):
         return None
 
 
-def _http_bytes(url, timeout=30):
+def _http_bytes(url, timeout=HTTP_TIMEOUT):
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
             if r.status != 200:
