@@ -39,6 +39,7 @@ import config as C
 INPUT = "clienti_finanziario.csv"
 OUTPUT_DIR = "preventivi_pdf"
 TETTI_DIR = "tetti_cache"
+RAW_DIR = "solar_raw"            # JSON grezzi buildingInsights (centro/boundingBox edificio)
 LOGO_SVG = "logo.f586e6.svg"
 
 DISCLAIMER = "Stima indicativa soggetta a sopralluogo tecnico."
@@ -55,6 +56,7 @@ PREZZO_ELETTRICITA = C.PREZZO_ELETTRICITA
 # Static Maps maptype=satellite che e' disabilitato nel SEE).
 SOLAR_DATALAYERS = "https://solar.googleapis.com/v1/dataLayers:get"
 RADIUS_METERS = 35        # raggio richiesto alla Solar API (taratura inquadratura)
+MARGINE_EDIFICIO = 0.35   # contorno tenuto attorno al boundingBox dell'edificio nel crop
 
 # --- colori brand ---
 BRAND = "#3BA9DD"
@@ -191,39 +193,93 @@ def _append_key(url, key):
     return f"{url}{sep}key={urllib.parse.quote(key)}"
 
 
-def _tiff_to_png(data, out_path):
-    """Converte i byte di un GeoTIFF RGB in PNG (l'immagine resta com'e': l'inquadratura
-    nel PDF e' gestita in fase di rendering con il 'cover' del riquadro).
-    Primario: Pillow. Fallback: tifffile -> Pillow. Ritorna True se riuscito."""
+def _decode_tiff(data):
+    """Byte di un GeoTIFF RGB -> immagine PIL (RGB), oppure None.
+    Primario: Pillow. Fallback: tifffile -> Pillow."""
     from io import BytesIO
-    im = None
     try:
         from PIL import Image
         im = Image.open(BytesIO(data))
         im.load()
-        im = im.convert("RGB")
+        return im.convert("RGB")
     except Exception:
-        im = None
-    if im is None:
-        try:
-            import numpy as np
-            import tifffile
-            from PIL import Image
-            arr = tifffile.imread(BytesIO(data))
-            # bande-prima (3,H,W) -> bande-dopo (H,W,3)
-            if arr.ndim == 3 and arr.shape[0] in (3, 4) and arr.shape[-1] not in (3, 4):
-                arr = np.moveaxis(arr, 0, -1)
-            arr = arr[..., :3]
-            if arr.dtype != np.uint8:
-                a = arr.astype("float32")
-                mx = float(a.max()) or 1.0
-                arr = (a / mx * 255).clip(0, 255).astype("uint8")
-            im = Image.fromarray(arr, "RGB")
-        except Exception as e:
-            sys.stderr.write(f"[avviso] conversione GeoTIFF fallita ({e}).\n")
-            return False
-    im.save(out_path, "PNG")
-    return True
+        pass
+    try:
+        import numpy as np
+        import tifffile
+        from PIL import Image
+        arr = tifffile.imread(BytesIO(data))
+        if arr.ndim == 3 and arr.shape[0] in (3, 4) and arr.shape[-1] not in (3, 4):
+            arr = np.moveaxis(arr, 0, -1)   # bande-prima -> bande-dopo
+        arr = arr[..., :3]
+        if arr.dtype != np.uint8:
+            a = arr.astype("float32")
+            mx = float(a.max()) or 1.0
+            arr = (a / mx * 255).clip(0, 255).astype("uint8")
+        return Image.fromarray(arr, "RGB")
+    except Exception as e:
+        sys.stderr.write(f"[avviso] conversione GeoTIFF fallita ({e}).\n")
+        return None
+
+
+def _bbox_da(box):
+    """{'sw':{latitude,longitude},'ne':{...}} -> (sw_lat, sw_lng, ne_lat, ne_lng) o None."""
+    try:
+        sw, ne = box["sw"], box["ne"]
+        return (float(sw["latitude"]), float(sw["longitude"]),
+                float(ne["latitude"]), float(ne["longitude"]))
+    except (TypeError, KeyError, ValueError):
+        return None
+
+
+def _geom_edificio(cid):
+    """Legge da solar_raw/<cid>.json (buildingInsights) il boundingBox dell'edificio.
+    Ritorna (sw_lat, sw_lng, ne_lat, ne_lng) o None se non disponibile."""
+    fp = os.path.join(RAW_DIR, f"{cid}.json")
+    if not os.path.exists(fp):
+        return None
+    try:
+        with open(fp, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return None
+    return _bbox_da(data.get("boundingBox"))
+
+
+def _crop_su_edificio(im, img_bbox, edificio_bbox, margine=MARGINE_EDIFICIO):
+    """Ritaglia l'immagine RGB (geo-referenziata da img_bbox) attorno al boundingBox
+    dell'edificio, con un margine di contorno. Ritorna l'immagine ritagliata, oppure
+    None se la geometria non e' utilizzabile (-> il chiamante usa l'immagine intera)."""
+    if not img_bbox or not edificio_bbox:
+        return None
+    W, H = im.size
+    s_lat, s_lng, n_lat, n_lng = img_bbox
+    dlat, dlng = (n_lat - s_lat), (n_lng - s_lng)
+    if not dlat or not dlng:
+        return None
+
+    def to_px(lat, lng):
+        x = (lng - s_lng) / dlng * W      # lng cresce verso destra
+        y = (n_lat - lat) / dlat * H      # lat: nord (n_lat) in alto -> y=0
+        return x, y
+
+    bs_lat, bs_lng, bn_lat, bn_lng = edificio_bbox
+    x1, y1 = to_px(bn_lat, bs_lng)        # angolo NO
+    x2, y2 = to_px(bs_lat, bn_lng)        # angolo SE
+    left, right = sorted((x1, x2))
+    top, bottom = sorted((y1, y2))
+    bw, bh = right - left, bottom - top
+    left -= bw * margine
+    right += bw * margine
+    top -= bh * margine
+    bottom += bh * margine
+    left = max(0, left)
+    top = max(0, top)
+    right = min(W, right)
+    bottom = min(H, bottom)
+    if right - left < 10 or bottom - top < 10:
+        return None
+    return im.crop((int(left), int(top), int(right), int(bottom)))
 
 
 def scarica_tetto(lat, lng, cid):
@@ -260,16 +316,22 @@ def scarica_tetto(lat, lng, cid):
         sys.stderr.write("[avviso] Solar API: nessun layer RGB (rgbUrl) per questo punto.\n")
         return None
 
-    # 3) scarica il GeoTIFF (chiave da appendere all'URL del layer)
+    # 3) scarica il GeoTIFF (chiave da appendere all'URL del layer) e decodifica
     data = _http_bytes(_append_key(rgb_url, key))
     if not data:
         return None
-
-    # 4) GeoTIFF -> PNG in cache
-    if not _tiff_to_png(data, path):
-        if os.path.exists(path) and os.path.getsize(path) == 0:
-            os.remove(path)
+    im = _decode_tiff(data)
+    if im is None:
         return None
+
+    # 4) inquadra sull'edificio: boundingBox immagine (da dataLayers) + boundingBox
+    #    edificio (da buildingInsights in solar_raw). Se la geometria manca -> immagine intera.
+    img_bbox = _bbox_da(meta.get("boundingBox"))
+    edificio_bbox = _geom_edificio(cid)
+    ritaglio = _crop_su_edificio(im, img_bbox, edificio_bbox)
+    if ritaglio is None and edificio_bbox is None:
+        sys.stderr.write(f"[info] {cid}: geometria edificio assente, uso l'immagine intera.\n")
+    (ritaglio or im).save(path, "PNG")
     return path
 
 

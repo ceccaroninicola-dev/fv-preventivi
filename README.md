@@ -95,18 +95,33 @@ Europa risponde. Flusso (in `step6_pdf.py`):
    `view=IMAGERY_LAYERS` e la chiave `os.environ["GOOGLE_MAPS_KEY"]`.
 2. Dalla risposta si legge il campo **`rgbUrl`** e si scarica quel layer (un **GeoTIFF**)
    appendendo `?key=...` all'URL.
-3. Il GeoTIFF viene convertito in **PNG** con **Pillow** e salvato in cache, senza
-   ritagli (l'immagine resta com'e'). *Niente pannelli disegnati sopra: solo l'immagine.*
+2b. Dalla stessa risposta `dataLayers:get` si legge il **`boundingBox` dell'immagine**
+   (estensione geografica del GeoTIFF), che serve per inquadrare l'edificio (punto 3b).
+3. Il GeoTIFF viene convertito in **PNG** con **Pillow**.
+   *Niente pannelli disegnati sopra: solo l'immagine.*
    - Se Pillow non legge quel GeoTIFF su Windows, lo step usa come **fallback**
      `tifffile` + `numpy` (per i TIFF compressi serve anche `imagecodecs`):
      `py -m pip install tifffile numpy imagecodecs`.
+3b. **Inquadratura sull'edificio**: su edifici in centro storico o vicini tra loro, il
+   raggio fisso rischia di centrare il punto sbagliato (es. un incrocio). Per evitarlo si
+   usa il **`boundingBox` dell'edificio** preso da `buildingInsights:findClosest` (gia'
+   salvato dallo step 3 in `solar_raw/<ID>.json`): confrontando il boundingBox
+   dell'immagine con quello dell'edificio si calcola, in pixel, dove sta l'edificio e si
+   **ritaglia/centra** l'immagine su di esso lasciando un margine di contorno
+   (`MARGINE_EDIFICIO`, ~35%). Se la geometria dell'edificio non e' disponibile, si usa
+   l'immagine intera (fallback, senza crash).
 4. Nel PDF l'immagine viene resa in modalita' **"cover"**: scalata col fattore
    `max(w/iw, h/ih)` per **riempire sempre e completamente** il riquadro (la Solar API
    restituisce immagini quadrate, il box e' panoramico), con l'eccedenza ritagliata dal
    clip arrotondato. Sotto c'e' comunque uno sfondo neutro, cosi' che in nessun caso
    (immagine assente o non disegnabile) resti visibile lo sfondo scuro della pagina.
 
-   Parametro di taratura in cima a `step6_pdf.py`: `RADIUS_METERS`.
+   Parametri di taratura in cima a `step6_pdf.py`: `RADIUS_METERS`, `MARGINE_EDIFICIO`.
+
+Sotto l'immagine il PDF stampa la **riga indirizzo** (`VIA_CIVICO, CAP COMUNE`; fallback a
+`INDIRIZZO_GEOCODING`). Se il comune della fornitura (`COMUNE_POD`) differisce dall'indirizzo
+legale (`COMUNE`), viene segnalato in rosso ("comune fornitura diverso: ..."): utile per
+accorgersi dei casi in cui il tetto inquadrato potrebbe non corrispondere all'indirizzo legale.
 
 - **Cache obbligatoria** in `tetti_cache/<ID>.png`: se il PNG esiste gia', l'API **non**
   viene richiamata (ogni `dataLayers` costa ~0,075 €, da pagare una sola volta per cliente).
