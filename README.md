@@ -132,9 +132,18 @@ accorgersi dei casi in cui il tetto inquadrato potrebbe non corrispondere all'in
 
 - **Cache obbligatoria** in `tetti_cache/<ID>.png`: se il PNG esiste gia', l'API **non**
   viene richiamata (ogni `dataLayers` costa ~0,075 €, da pagare una sola volta per cliente).
+- **Retry su rete/timeout**: sia `dataLayers:get` sia il download del GeoTIFF vengono
+  ritentati fino a 3 volte con backoff crescente (2s, 4s, 8s; timeout 30s a tentativo).
+  Si ritenta **solo** su timeout/errori di rete temporanei: su 404 / nessun `rgbUrl` /
+  nessuna copertura ci si arrende **subito** (inutile insistere). Parametri in cima al
+  file: `HTTP_TIMEOUT`, `RETRY_TENTATIVI`, `RETRY_BACKOFF`.
 - Se la chiave o le coordinate mancano, la chiamata fallisce, oppure per quel punto **non
   c'e' copertura immagine** (nessun `rgbUrl`), il PDF si genera comunque con un
   **placeholder grigio** (nessun crash).
+- **Log dei falliti**: quando un cliente resta senza immagine dopo i retry, viene scritta
+  una riga in `tetti_falliti.csv` (`ID_CLIENTE`, `MOTIVO`, `TIMESTAMP`) con motivo
+  `TIMEOUT_RETRY_ESAURITI` / `NESSUNA_IMMAGINE` / `ALTRO_ERRORE`, cosi' a fine batch si sa
+  quali clienti ri-processare e perche'.
 
-> I PDF (`preventivi_pdf/`) e le immagini dei tetti (`tetti_cache/`) contengono dati
-> cliente: sono esclusi dal `.gitignore` e non vanno mai committati.
+> I PDF (`preventivi_pdf/`), le immagini dei tetti (`tetti_cache/`) e `tetti_falliti.csv`
+> contengono dati cliente: sono esclusi dal `.gitignore` e non vanno mai committati.
