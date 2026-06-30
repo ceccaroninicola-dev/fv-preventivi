@@ -95,24 +95,18 @@ Europa risponde. Flusso (in `step6_pdf.py`):
    `view=IMAGERY_LAYERS` e la chiave `os.environ["GOOGLE_MAPS_KEY"]`.
 2. Dalla risposta si legge il campo **`rgbUrl`** e si scarica quel layer (un **GeoTIFF**)
    appendendo `?key=...` all'URL.
-3. Il GeoTIFF viene convertito in **PNG** con **Pillow** e salvato in cache.
-   *Niente pannelli disegnati sopra: solo l'immagine pulita.*
+3. Il GeoTIFF viene convertito in **PNG** con **Pillow** e salvato in cache, senza
+   ritagli (l'immagine resta com'e'). *Niente pannelli disegnati sopra: solo l'immagine.*
    - Se Pillow non legge quel GeoTIFF su Windows, lo step usa come **fallback**
      `tifffile` + `numpy` (per i TIFF compressi serve anche `imagecodecs`):
      `py -m pip install tifffile numpy imagecodecs`.
+4. Nel PDF l'immagine viene resa in modalita' **"cover"**: scalata col fattore
+   `max(w/iw, h/ih)` per **riempire sempre e completamente** il riquadro (la Solar API
+   restituisce immagini quadrate, il box e' panoramico), con l'eccedenza ritagliata dal
+   clip arrotondato. Sotto c'e' comunque uno sfondo neutro, cosi' che in nessun caso
+   (immagine assente o non disegnabile) resti visibile lo sfondo scuro della pagina.
 
-   Pulizia dell'immagine, in due passaggi:
-   - **Rimozione delle fasce "no data"**: la Solar API restituisce un GeoTIFF in cui le
-     aree fuori copertura sono rettangoli a tinta uniforme (grigio/nero), brutti nel PDF.
-     Si prende il colore di un angolo come riferimento, si calcola la differenza
-     pixel-pixel e si tiene il **bounding box** di cio' che se ne discosta oltre
-     `NODATA_SOGLIA`: cosi' i bordi uniformi vengono ritagliati via, **senza** assumere
-     il valore esatto del no-data (funziona per qualsiasi tinta).
-   - **Zoom sull'edificio**: si tiene la **porzione centrale** (`CENTER_CROP_FRAC`, ~65%)
-     per ridurre strada/contorno e far riempire il riquadro al tetto.
-
-   Parametri di taratura in cima a `step6_pdf.py`: `RADIUS_METERS`, `CENTER_CROP_FRAC`,
-   `NODATA_SOGLIA`.
+   Parametro di taratura in cima a `step6_pdf.py`: `RADIUS_METERS`.
 
 - **Cache obbligatoria** in `tetti_cache/<ID>.png`: se il PNG esiste gia', l'API **non**
   viene richiamata (ogni `dataLayers` costa ~0,075 €, da pagare una sola volta per cliente).
