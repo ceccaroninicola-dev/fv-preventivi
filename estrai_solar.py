@@ -4,7 +4,8 @@ Estrattore completo dati Solar: legge i JSON grezzi in solar_raw/ e produce
 un estratto leggibile con TUTTI i campi utili per il preventivo.
 
 - Input:  solar_raw/<ID>.json  (grezzi dello step 3) + clienti_solar.csv
-          + clienti_geocodificati.csv (per propagare LAT/LNG, match per ID_CLIENTE)
+          + clienti_geocodificati.csv (per propagare LAT/LNG e le colonne indirizzo
+            VIA_CIVICO/CAP/INDIRIZZO_GEOCODING/COMUNE_POD, match per ID_CLIENTE)
 - Output: clienti_solar_completo.csv  (un cliente per riga, campi espansi)
           + stampa a video un esempio dettagliato per i primi clienti
 - Solo libreria standard.
@@ -117,6 +118,11 @@ def main():
             "NOME": b.get("NOME", ""),
             "SEGMENTO": b.get("SEGMENTO", ""),
             "COMUNE": b.get("COMUNE", ""),
+            # colonne indirizzo: dallo step 2 (clienti_geocodificati.csv), match per ID_CLIENTE
+            "VIA_CIVICO": g.get("VIA_CIVICO", b.get("VIA_CIVICO", "")),
+            "CAP": g.get("CAP", b.get("CAP", "")),
+            "INDIRIZZO_GEOCODING": g.get("INDIRIZZO_GEOCODING", b.get("INDIRIZZO_GEOCODING", "")),
+            "COMUNE_POD": g.get("COMUNE_POD", b.get("COMUNE_POD", "")),
             "LAT": g.get("LAT", b.get("LAT", "")),
             "LNG": g.get("LNG", b.get("LNG", "")),
             "CONSUMO_KWH_ANNO": b.get("CONSUMO_KWH_ANNO", ""),
