@@ -27,6 +27,7 @@ DERATE_AC = 1 - PERDITE_SISTEMA
 LISTINO_PRIVATI = {int(k): v for k, v in _P["privati"]["listino"].items()}
 MAX_KWP_PRIVATI = _P["privati"]["max_kwp"]                 # cap monofase (6 kWp) e soglia listino
 MAX_KWP_DOMESTICO = _P["privati"]["max_kwp_domestico"]     # limite invalicabile domestico (20 kWp)
+SOGLIA_TRIFASE_KW = _P["privati"]["soglia_trifase_kw"]     # oltre questa POTENZA_DISP e' trifase (6,6 kW)
 COPERTURA_MINIMA = _P["privati"]["copertura_minima"]
 
 FASCE_AZIENDE = [(f["kwp_min"], f["kwp_max"], f["prezzo_per_kwp"]) for f in _P["aziende"]["fasce"]]
