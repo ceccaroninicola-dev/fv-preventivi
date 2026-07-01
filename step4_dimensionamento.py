@@ -68,11 +68,11 @@ def dimensiona(row):
     e_priv = seg.startswith("PRIV")
 
     # 1) CAP DA CONTATORE (solo domestici), con limite invalicabile max_kwp_domestico.
-    #    monofase (contatore <= 6 kW)  -> cap 6 kWp
-    #    trifase  (contatore  > 6 kW)  -> cap = potenza contatore, comunque <= max_kwp_domestico
+    #    monofase (POTENZA_DISP <= soglia_trifase, 6,6 kW: contrattuale 6 kW + 10%) -> cap 6 kWp
+    #    trifase  (POTENZA_DISP  > soglia_trifase) -> cap = potenza contatore, <= max_kwp_domestico
     trifase = False
     if e_priv:
-        if pot_disp and pot_disp > 6:
+        if pot_disp and pot_disp > C.SOGLIA_TRIFASE_KW:
             cap_contatore = min(pot_disp, C.MAX_KWP_DOMESTICO)
             trifase = True
         else:

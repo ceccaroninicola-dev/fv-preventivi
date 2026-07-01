@@ -22,6 +22,7 @@
     },
     "max_kwp": 6,
     "max_kwp_domestico": 20,
+    "soglia_trifase_kw": 6.6,
     "copertura_minima": 0.8
   },
   "aziende": {
