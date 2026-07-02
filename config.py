@@ -62,7 +62,7 @@ def prezzo_impianto(segmento, kwp):
                 if eur_kwp is None:
                     return None, fascia, f"prezzo fascia {fascia} non ancora fornito"
                 return round(eur_kwp * kwp, 2), fascia, ""
-        return None, ">1000 kWp", "oltre l'ultima fascia prevista (500-1000)"
+        return None, "fuori fascia", f"nessuna fascia prevista per {kwp} kWp"
     return None, "?", f"segmento sconosciuto: {segmento}"
 
 

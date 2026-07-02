@@ -29,48 +29,58 @@
     "fasce": [
       {
         "kwp_min": 3,
-        "kwp_max": 11,
-        "prezzo_per_kwp": null
+        "kwp_max": 6,
+        "prezzo_per_kwp": 1465
       },
       {
-        "kwp_min": 11,
+        "kwp_min": 6,
+        "kwp_max": 12,
+        "prezzo_per_kwp": 1200
+      },
+      {
+        "kwp_min": 12,
         "kwp_max": 20,
-        "prezzo_per_kwp": null
+        "prezzo_per_kwp": 1175
       },
       {
         "kwp_min": 20,
         "kwp_max": 50,
-        "prezzo_per_kwp": null
+        "prezzo_per_kwp": 1095
       },
       {
         "kwp_min": 50,
         "kwp_max": 100,
-        "prezzo_per_kwp": null
+        "prezzo_per_kwp": 865
       },
       {
         "kwp_min": 100,
         "kwp_max": 200,
-        "prezzo_per_kwp": null
+        "prezzo_per_kwp": 770
       },
       {
         "kwp_min": 200,
         "kwp_max": 300,
-        "prezzo_per_kwp": null
+        "prezzo_per_kwp": 725
       },
       {
         "kwp_min": 300,
         "kwp_max": 400,
-        "prezzo_per_kwp": null
+        "prezzo_per_kwp": 690
       },
       {
         "kwp_min": 400,
         "kwp_max": 500,
-        "prezzo_per_kwp": null
+        "prezzo_per_kwp": 670
       },
       {
         "kwp_min": 500,
         "kwp_max": 1000,
-        "prezzo_per_kwp": null
+        "prezzo_per_kwp": 640
+      },
+      {
+        "kwp_min": 1000,
+        "kwp_max": 100000,
+        "prezzo_per_kwp": 620
       }
     ],
     "modello_prezzo": "flat_per_fascia"
